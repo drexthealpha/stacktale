@@ -11,6 +11,11 @@
 #   every registered name appears in all three documents  -- tells you which file you forgot
 #   the "**N tools**" count equals the number registered  -- what a reader trusts at a glance
 #
+# A name is looked for wrapped in backticks, not bare. `errors_since` is a prefix of
+# `errors_since_last_check`, so a bare substring match is satisfied by the longer
+# sibling: undocument the short one and the guard reports that all three agree. All
+# three documents already write every name as code, so the backticks are the anchor.
+#
 # The count is spelled in words. Rather than teach a shell script English, the words it has
 # met are mapped below; an unmapped one is reported rather than skipped, so growing past the
 # list fails loudly instead of silently passing.
@@ -39,7 +44,8 @@ for doc in "${docs[@]}"; do
     continue
   fi
   while IFS= read -r name; do
-    if ! grep -qF "$name" "$doc"; then
+    # Escaped: an unescaped backtick inside double quotes is command substitution.
+    if ! grep -qF -- "\`$name\`" "$doc"; then
       echo "check-mcp-tools: the server registers '$name', absent from $doc" >&2
       fail=1
     fi
@@ -64,12 +70,16 @@ fi
 
 for doc in "${docs[@]}"; do
   [ -f "$doc" ] || continue
-  claimed="$(grep -oE '\*\*[A-Z][a-z]+ tools\*\*' "$doc" | head -1 | sed 's/\*\*\([A-Za-z]*\) tools\*\*/\1/' || true)"
-  [ -z "$claimed" ] && continue      # this document does not open with a count
-  if [ "$claimed" != "$want" ]; then
-    echo "check-mcp-tools: $doc says '**$claimed tools**'; the server registers $count ($want)" >&2
-    fail=1
-  fi
+  # Every occurrence, not just the first: a second count further down a file is the
+  # same stale sentence a reader trusts, and check-plugin-versions.sh reads them all.
+  claimed="$(grep -oE '\*\*[A-Z][a-z]+ tools\*\*' "$doc" | sed 's/\*\*\([A-Za-z]*\) tools\*\*/\1/' || true)"
+  [ -z "$claimed" ] && continue      # this document does not state a count
+  while IFS= read -r one; do
+    if [ "$one" != "$want" ]; then
+      echo "check-mcp-tools: $doc says '**$one tools**'; the server registers $count ($want)" >&2
+      fail=1
+    fi
+  done <<< "$claimed"
 done
 
 if [ "$fail" -eq 0 ]; then
